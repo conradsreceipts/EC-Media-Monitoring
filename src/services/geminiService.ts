@@ -4,18 +4,31 @@ import { fetchRSSFeeds } from "./rssService";
 
 // Use process.env.GEMINI_API_KEY or import.meta.env.VITE_GEMINI_API_KEY
 const getApiKey = () => {
-  // @ts-ignore
-  const key = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
-         // @ts-ignore
-         import.meta.env.VITE_GEMINI_API_KEY || 
-         '';
+  // Use direct string references for Vite's 'define' to work reliably
+  const processKey = process.env.GEMINI_API_KEY;
+  const viteKey = import.meta.env.VITE_GEMINI_API_KEY;
   
-  const trimmed = key.trim();
-  // Ignore common placeholders
-  if (trimmed === 'YOUR_GEMINI_API_KEY' || trimmed === 'MY_GEMINI_API_KEY' || trimmed === 'AIza...') {
+  console.log("DEBUG: getApiKey - processKey length:", (processKey || '').length);
+  console.log("DEBUG: getApiKey - viteKey length:", (viteKey || '').length);
+  
+  const key = (processKey || viteKey || '').trim();
+  
+  // Ignore common placeholders and invalid strings
+  const invalidPlaceholders = [
+    'YOUR_GEMINI_API_KEY', 
+    'MY_GEMINI_API_KEY', 
+    'AIza...', 
+    'undefined', 
+    'null',
+    ''
+  ];
+
+  if (invalidPlaceholders.includes(key)) {
+    console.log("DEBUG: getApiKey - Key is a placeholder or empty");
     return '';
   }
-  return trimmed;
+  
+  return key;
 };
 
 const defaultAi = new GoogleGenAI({ apiKey: getApiKey() });
@@ -172,8 +185,15 @@ export async function runMonitoring(
   }
 
   const apiKey = (userApiKey && userApiKey.trim()) || getApiKey();
-  if (!apiKey) {
-    log("CRITICAL: No Gemini API Key detected. Aborting monitoring.");
+  
+  // Debug logging (safe version)
+  const keySource = userApiKey ? "User Provided (UI)" : "Environment Variable";
+  log(`DEBUG: API Key Source: ${keySource}`);
+  log(`DEBUG: Detected Key Length: ${apiKey.length}`);
+  log(`DEBUG: Detected Key Prefix: ${apiKey.substring(0, 6)}...`);
+
+  if (!apiKey || apiKey.length < 10) {
+    log(`CRITICAL: No valid Gemini API Key detected (Length: ${apiKey.length}). Aborting monitoring.`);
     throw new Error("INVALID_API_KEY: No API key provided. Please set GEMINI_API_KEY or provide one in the UI.");
   }
   

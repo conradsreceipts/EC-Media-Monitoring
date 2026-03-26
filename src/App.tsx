@@ -126,7 +126,7 @@ export default function App() {
     { id: 5, name: "Finalizing", desc: "Generating intelligence report", icon: <FileText className="w-3.5 h-3.5" /> }
   ];
   const [error, setError] = useState<string | null>(null);
-  const [userApiKey, setUserApiKey] = useState<string>('');
+  const [userApiKey, setUserApiKey] = useState<string>(import.meta.env.VITE_GEMINI_API_KEY || '');
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [activeSubModal, setActiveSubModal] = useState<{
@@ -194,7 +194,11 @@ export default function App() {
     setLoadingStatus("Initializing...");
     setLoadingStage(1);
     setActivityLog(["SYSTEM: Initializing Media Intelligence Discovery..."]);
-    setShowLogs(true); // Automatically show logs when starting
+    setActivityLog(prev => [...prev, `DEBUG: API Key Source: ${userApiKey ? "User Provided (UI)" : "Environment Variable"}`]);
+    if (userApiKey) {
+      setActivityLog(prev => [...prev, `DEBUG: User API Key Length: ${userApiKey.trim().length}`]);
+    }
+    setShowLogs(true);
     setError(null);
     setShowRunDropdown(false);
     setShowCompletionPopup(false);
@@ -209,6 +213,12 @@ export default function App() {
       }
     } catch (e) {
       setActivityLog(prev => [...prev, "CRITICAL: Backend API is UNREACHABLE. Ensure the server is running and routes are configured."]);
+    }
+
+    console.log("Starting Monitor with config:", finalConfig);
+    console.log("API Key Source:", userApiKey ? "User Provided (UI)" : "Environment Variable");
+    if (userApiKey) {
+      console.log("User API Key Length:", userApiKey.trim().length);
     }
 
     try {
