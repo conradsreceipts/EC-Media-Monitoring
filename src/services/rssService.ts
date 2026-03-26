@@ -178,9 +178,10 @@ const FEED_SOURCES: RSSFeedSource[] = [
 export async function fetchRSSFeeds(onProgress?: (status: string) => void) {
   const allArticles: any[] = [];
   
-  // Parallelize fetching across all sources
-  const sourcePromises = FEED_SOURCES.map(async (source) => {
+  // Fetch sources sequentially to avoid rate limits and serverless timeouts
+  for (const source of FEED_SOURCES) {
     const urlsToTry = [source.url, ...(source.altUrls || [])];
+    let sourceArticles: any[] = [];
     
     // Try URLs for this source sequentially (failover logic)
     for (const url of urlsToTry) {
@@ -191,22 +192,20 @@ export async function fetchRSSFeeds(onProgress?: (status: string) => void) {
         const response = await fetch(fetchUrl);
         
         if (!response.ok) {
-          const errorMsg = `Failed to fetch ${source.name} from ${url}: HTTP ${response.status} ${response.statusText}`;
+          let errorDetail = "";
+          try {
+            const errorJson = await response.json();
+            errorDetail = errorJson.error || errorJson.details || "";
+          } catch (e) {
+            errorDetail = response.statusText;
+          }
+          
+          const errorMsg = `Failed to fetch ${source.name} from ${url}: HTTP ${response.status} - ${errorDetail}`;
           console.warn(errorMsg);
-          if (onProgress) onProgress(`WARNING: ${source.name} returned HTTP ${response.status}`);
+          if (onProgress) onProgress(`WARNING: ${source.name} returned HTTP ${response.status} (${errorDetail.substring(0, 30)}${errorDetail.length > 30 ? '...' : ''})`);
           continue; 
         }
         
-        const contentType = response.headers.get("content-type");
-        if (contentType && !contentType.includes("application/json")) {
-          const text = await response.text();
-          if (text.toLowerCase().includes("<!doctype html") || text.toLowerCase().includes("<html")) {
-            console.error(`RSS FETCH ERROR: Received HTML instead of JSON for ${source.name} from ${url}`);
-            if (onProgress) onProgress(`CRITICAL: Backend API returned HTML (likely a 404 or redirect) for ${source.name}`);
-            continue;
-          }
-        }
-
         const feed = await response.json();
         
         if (!feed.items || feed.items.length === 0) {
@@ -225,20 +224,28 @@ export async function fetchRSSFeeds(onProgress?: (status: string) => void) {
         
         if (articles.length > 0) {
           if (onProgress) onProgress(`SUCCESS: Extracted ${articles.length} articles from ${source.name}`);
-          return articles;
+          sourceArticles = articles;
+          break; // Stop trying alt URLs if we got articles
         }
       } catch (error: any) {
         const errorMsg = `Error fetching RSS from ${source.name} (${url}): ${error.message}`;
         console.error(errorMsg);
+        if (onProgress) onProgress(`ERROR: ${source.name} - ${error.message}`);
       }
+      
+      // Small delay between retries
+      await new Promise(r => setTimeout(r, 500));
     }
     
-    if (onProgress) onProgress(`CRITICAL: All URLs failed for ${source.name}.`);
-    return [];
-  });
+    if (sourceArticles.length > 0) {
+      allArticles.push(...sourceArticles);
+    } else {
+      if (onProgress) onProgress(`CRITICAL: All URLs failed for ${source.name}.`);
+    }
 
-  const results = await Promise.all(sourcePromises);
-  results.forEach(articles => allArticles.push(...articles));
+    // Small delay between sources to be polite to servers
+    await new Promise(r => setTimeout(r, 300));
+  }
   
   return allArticles;
 }
