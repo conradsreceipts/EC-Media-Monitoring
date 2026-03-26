@@ -5,10 +5,17 @@ import { fetchRSSFeeds } from "./rssService";
 // Use process.env.GEMINI_API_KEY or import.meta.env.VITE_GEMINI_API_KEY
 const getApiKey = () => {
   // @ts-ignore
-  return (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
+  const key = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
          // @ts-ignore
          import.meta.env.VITE_GEMINI_API_KEY || 
          '';
+  
+  const trimmed = key.trim();
+  // Ignore common placeholders
+  if (trimmed === 'YOUR_GEMINI_API_KEY' || trimmed === 'MY_GEMINI_API_KEY' || trimmed === 'AIza...') {
+    return '';
+  }
+  return trimmed;
 };
 
 const defaultAi = new GoogleGenAI({ apiKey: getApiKey() });
@@ -29,14 +36,43 @@ async function callGeminiWithRetry<T>(
     } catch (error: any) {
       lastError = error;
       
-      // Check for rate limit (429) or other transient errors
-      const isRateLimit = error.status === "RESOURCE_EXHAUSTED" || error.code === 429 || error.message?.includes("429") || error.message?.includes("quota");
+      // Log the full error for debugging in the browser console
+      console.error("Gemini API Error Details:", {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+        details: error.details
+      });
+
+      // Check for quota exhaustion
+      const isQuotaExhausted = 
+        error.status === "RESOURCE_EXHAUSTED" || 
+        error.code === 429 || 
+        error.message?.includes("429") || 
+        (error.message?.toLowerCase().includes("quota") && !error.message?.toLowerCase().includes("invalid") && !error.message?.toLowerCase().includes("api key"));
       
-      if (isRateLimit) {
-        // If it's a rate limit, we might want to stop retrying if we've hit it multiple times
-        // or just throw it immediately if we want the UI to handle it.
-        // For this request, we'll throw it so the UI can show the popup.
+      if (isQuotaExhausted) {
         throw new Error("QUOTA_EXHAUSTED");
+      }
+
+      // Check for invalid API key - be very specific to avoid false positives
+      const isInvalidKey = 
+        error.message?.toLowerCase().includes("api_key_invalid") || 
+        error.message?.toLowerCase().includes("api key is invalid") ||
+        error.message?.toLowerCase().includes("invalid api key") ||
+        (error.status === "UNAUTHENTICATED" && error.message?.toLowerCase().includes("key"));
+
+      if (isInvalidKey) {
+        throw new Error(`INVALID_API_KEY: ${error.message}`);
+      }
+
+      // Check for search tool specific errors
+      const isSearchToolError = 
+        error.message?.toLowerCase().includes("search tool") || 
+        error.message?.toLowerCase().includes("grounding");
+
+      if (isSearchToolError) {
+        throw new Error(`SEARCH_TOOL_ERROR: ${error.message}`);
       }
 
       const isTransient = 
@@ -50,11 +86,10 @@ async function callGeminiWithRetry<T>(
         throw error;
       }
 
-      // If it's a rate limit, use a slightly more aggressive backoff or longer initial delay
-      const baseDelay = isRateLimit ? initialDelay * 2 : initialDelay;
-      const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+      // If it's a transient error, use exponential backoff
+      const delay = initialDelay * Math.pow(2, attempt) + Math.random() * 1000;
       
-      console.warn(`Gemini API call failed (${isRateLimit ? 'Rate Limit' : 'Transient Error'}). Attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${Math.round(delay)}ms...`);
+      console.warn(`Gemini API call failed (Transient Error). Attempt ${attempt + 1}/${maxRetries + 1}. Retrying in ${Math.round(delay)}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -138,10 +173,11 @@ export async function runMonitoring(
 
   const apiKey = (userApiKey && userApiKey.trim()) || getApiKey();
   if (!apiKey) {
-    log("CRITICAL: No Gemini API Key detected. Discovery will likely fail.");
-  } else {
-    log("SYSTEM: API Key detected. Initializing Discovery...");
+    log("CRITICAL: No Gemini API Key detected. Aborting monitoring.");
+    throw new Error("INVALID_API_KEY: No API key provided. Please set GEMINI_API_KEY or provide one in the UI.");
   }
+  
+  log("SYSTEM: API Key detected. Initializing Discovery...");
   log(`SYSTEM: Target Date Range: ${dateRangeText} (Start: ${startDate})`);
   
   const ai = new GoogleGenAI({ apiKey });

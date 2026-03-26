@@ -19,7 +19,7 @@ const app = express();
 export default app;
 
 async function startServer() {
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
   const parser = new Parser({
     timeout: 10000,
     headers: {
@@ -31,7 +31,13 @@ async function startServer() {
 
   // API routes
   app.get("/api/health", (req, res) => {
-    res.json({ status: "ok" });
+    res.json({ 
+      status: "ok", 
+      environment: process.env.NODE_ENV,
+      timestamp: new Date().toISOString(),
+      host: req.headers.host,
+      platform: process.env.VERCEL ? 'Vercel' : 'Standard'
+    });
   });
 
   app.get("/api/rss-fetch", async (req, res) => {
@@ -208,7 +214,8 @@ async function startServer() {
   }
 
   // Only listen if we're not in a serverless environment (like Vercel)
-  if (!process.env.VERCEL) {
+  // On Render/Railway/etc, we DO want to listen
+  if (!process.env.VERCEL || process.env.RENDER) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });

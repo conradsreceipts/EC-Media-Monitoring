@@ -234,11 +234,23 @@ export default function App() {
       });
       setReport(result);
     } catch (err: any) {
-      console.error(err);
-      if (err.message === "QUOTA_EXHAUSTED") {
+      console.error("Monitoring Error:", err);
+      const errorMessage = err.message || 'Unknown error';
+      
+      if (errorMessage === "QUOTA_EXHAUSTED") {
+        setActivityLog(prev => [...prev, "CRITICAL: Gemini API Quota Exhausted. Please try again later or use a different API key."]);
         setShowQuotaPopup(true);
+      } else if (errorMessage.startsWith("INVALID_API_KEY")) {
+        const detail = errorMessage.split(': ')[1] || 'Please check your key.';
+        setActivityLog(prev => [...prev, `CRITICAL: Invalid API Key: ${detail}`]);
+        setError(`Invalid API Key: ${detail}`);
+      } else if (errorMessage.startsWith("SEARCH_TOOL_ERROR")) {
+        const detail = errorMessage.split(': ')[1] || 'The Google Search tool is currently unavailable for this key/region.';
+        setActivityLog(prev => [...prev, `CRITICAL: Search Tool Error: ${detail}`]);
+        setError(`Search Tool Error: ${detail}. This often happens if the Google Search tool is not supported in your region or for your specific API key type.`);
       } else {
-        setError('Failed to run monitoring. Please check your API key and network connection.');
+        setActivityLog(prev => [...prev, `CRITICAL: ${errorMessage}`]);
+        setError(`Error: ${errorMessage}`);
       }
     } finally {
       setLoading(false);
@@ -853,7 +865,7 @@ export default function App() {
                     What happened?
                   </h4>
                   <p className="text-xs text-gray-600 leading-relaxed">
-                    The embedded API key has reached its free tier limit. To continue using the EC Media Intelligence Engine, you'll need to provide your own Gemini API key from Google AI Studio.
+                    The API key has reached its limit. This can happen if the free tier token quota is exhausted or if the Google Search tool limit has been reached for today. To continue, please provide a fresh Gemini API key from Google AI Studio.
                   </p>
                 </div>
 
