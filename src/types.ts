@@ -107,7 +107,7 @@ export interface MonitoringReport {
   articles: Article[];
   verification_checklist: {
     domain: string;
-    status: 'Checked - Articles Found' | 'Checked - No Relevant Articles' | 'Access Restricted';
+    status: 'Checked - Articles Found' | 'Checked - No Relevant Articles' | 'Access Restricted' | 'Zero Results';
     findings_summary: string;
   }[];
 }
@@ -206,7 +206,7 @@ export const REPORT_SCHEMA = {
         type: Type.OBJECT,
         properties: {
           domain: { type: Type.STRING },
-          status: { type: Type.STRING, enum: ['Checked - Articles Found', 'Checked - No Relevant Articles', 'Access Restricted'] },
+          status: { type: Type.STRING, enum: ['Checked - Articles Found', 'Checked - No Relevant Articles', 'Access Restricted', 'Zero Results'] },
           findings_summary: { type: Type.STRING }
         }
       }

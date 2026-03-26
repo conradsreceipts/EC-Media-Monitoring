@@ -39,6 +39,7 @@ import {
   Briefcase,
   Flag,
   ChevronDown,
+  Terminal,
   Layers,
   Key,
   Settings2,
@@ -114,6 +115,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState<string>("");
   const [activityLog, setActivityLog] = useState<string[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
   const [loadingStage, setLoadingStage] = useState<number>(0);
   const [subProcess, setSubProcess] = useState<string>("");
   const stages = [
@@ -166,6 +168,20 @@ export default function App() {
   const [filterRisks, setFilterRisks] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch('/api/health');
+        if (!res.ok) throw new Error('Backend offline');
+        console.log('System Health: OK');
+      } catch (e) {
+        console.warn('System Health: Backend API unreachable. RSS features will be disabled.');
+        setActivityLog(prev => [...prev, "CRITICAL: Backend API unreachable. RSS features will be disabled."]);
+      }
+    };
+    checkHealth();
+  }, []);
+
   const handleMonitor = async (range?: MonitoringConfig['dateRange']) => {
     const finalConfig = range ? { ...config, dateRange: range } : config;
     if (range === 'custom' && !showCustomDate) {
@@ -178,14 +194,14 @@ export default function App() {
     setLoadingStatus("Initializing...");
     setLoadingStage(1);
     setActivityLog(["System: Initializing Media Intelligence Discovery..."]);
+    setShowLogs(true); // Automatically show logs when starting
     setError(null);
     setShowRunDropdown(false);
     setShowCompletionPopup(false);
 
     try {
-      const result = await runMonitoring(finalConfig, userApiKey || undefined, (partialReport, status) => {
-        // We do NOT update the report here to prevent the dashboard from collapsing
-        // and causing the page to scroll to the top. We only update the loading status.
+      const result = await runMonitoring(finalConfig, userApiKey.trim() || undefined, (partialReport, status) => {
+        setActivityLog(prev => [...prev, status].slice(-100));
         setLoadingStatus(status);
         
         // Extract sub-process from status (remove timestamp and tags)
@@ -922,6 +938,13 @@ export default function App() {
               <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-green-600" />
               {orientation === 'landscape' ? 'SECURE MONITORING ACTIVE' : 'SECURE'}
             </div>
+            <button 
+              onClick={() => setShowLogs(!showLogs)}
+              className="px-3 py-1.5 sm:px-4 sm:py-2 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2 text-[9px] sm:text-xs font-bold text-gray-600 hover:bg-gray-100 transition-colors"
+            >
+              <Terminal className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+              {showLogs ? 'HIDE LOGS' : 'VIEW LOGS'}
+            </button>
             {report && (
               <PDFDownloadLink
                 document={<MediaIntelligencePDF data={preparePDFData()} dateRange={config.dateRange === 'custom' ? `${customDates.start} to ${customDates.end}` : config.dateRange} />}
@@ -940,6 +963,40 @@ export default function App() {
             )}
           </div>
         </div>
+
+        {showLogs && !loading && (
+          <motion.div 
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="mb-8"
+          >
+            <div className="bg-[#0a0a0a] rounded-3xl p-4 sm:p-6 border border-gray-800 shadow-2xl">
+              <div className="flex items-center justify-between mb-3 border-b border-gray-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-blue-500 rounded-full" />
+                  <span className="text-[9px] sm:text-[10px] font-mono font-bold text-gray-400 uppercase tracking-widest">System Console History</span>
+                </div>
+                <button 
+                  onClick={() => setActivityLog([])}
+                  className="text-[8px] sm:text-[9px] font-mono text-gray-600 hover:text-gray-400"
+                >
+                  CLEAR LOGS
+                </button>
+              </div>
+              <div className="space-y-1 max-h-48 overflow-y-auto pr-2 custom-scrollbar font-mono">
+                {activityLog.length === 0 ? (
+                  <div className="text-gray-600 text-[10px]">No activity logs available.</div>
+                ) : (
+                  activityLog.map((log, idx) => (
+                    <div key={idx} className="text-[9px] sm:text-[10px] leading-relaxed break-all text-gray-500">
+                      {log}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {loading && (
           <motion.div 

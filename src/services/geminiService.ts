@@ -2,8 +2,16 @@ import { GoogleGenAI } from "@google/genai";
 import { MonitoringConfig, MonitoringReport, REPORT_SCHEMA } from "../types";
 import { fetchRSSFeeds } from "./rssService";
 
-// Use process.env.GEMINI_API_KEY directly as per guidelines
-const defaultAi = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+// Use process.env.GEMINI_API_KEY or import.meta.env.VITE_GEMINI_API_KEY
+const getApiKey = () => {
+  // @ts-ignore
+  return (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
+         // @ts-ignore
+         import.meta.env.VITE_GEMINI_API_KEY || 
+         '';
+};
+
+const defaultAi = new GoogleGenAI({ apiKey: getApiKey() });
 
 /**
  * Helper to call Gemini API with exponential backoff retry logic
@@ -58,9 +66,6 @@ export async function runMonitoring(
   userApiKey?: string,
   onProgress?: (report: MonitoringReport, status: string) => void
 ): Promise<MonitoringReport> {
-  const ai = userApiKey ? new GoogleGenAI({ apiKey: userApiKey }) : defaultAi;
-  const model = "gemini-3-flash-preview";
-  
   const now = new Date();
   const today = now.toISOString().split('T')[0];
   
@@ -116,7 +121,31 @@ export async function runMonitoring(
   };
 
   log("SYSTEM: Initializing Eastern Cape Media Intelligence Engine v2.1...");
+  
+  // 0. Backend Health Check
+  try {
+    log("NETWORK: Verifying Backend API connectivity...");
+    const healthResponse = await fetch('/api/health').catch(() => ({ ok: false }));
+    if (!healthResponse.ok) {
+      log("CRITICAL: Backend API (/api/health) is unreachable. RSS discovery will be disabled.");
+      log("HINT: If deployed on Vercel/Netlify, ensure your Express server is correctly configured as a serverless function.");
+    } else {
+      log("NETWORK: Backend API confirmed online. RSS pipeline active.");
+    }
+  } catch (e) {
+    log("WARNING: Health check failed. Proceeding with caution.");
+  }
+
+  const apiKey = (userApiKey && userApiKey.trim()) || getApiKey();
+  if (!apiKey) {
+    log("CRITICAL: No Gemini API Key detected. Discovery will likely fail.");
+  } else {
+    log("SYSTEM: API Key detected. Initializing Discovery...");
+  }
   log(`SYSTEM: Target Date Range: ${dateRangeText} (Start: ${startDate})`);
+  
+  const ai = new GoogleGenAI({ apiKey });
+  const model = "gemini-3-flash-preview";
 
   const getEnabledTerms = (category: { enabled: boolean, subSections: { [key: string]: boolean } }, catName: string) => {
     log(`PARSER: Analyzing enabled sub-sections for ${catName}...`);
@@ -159,7 +188,7 @@ export async function runMonitoring(
   
   // 1. Discovery Phase: Parallelized search strategy
   const searchQueries = [
-    { name: "National & Regional News", query: `"Eastern Cape" ${termsQuery} ${partyExclusion} (site:news24.com OR site:timeslive.co.za OR site:iol.co.za OR site:dailymaverick.co.za OR site:dispatchlive.co.za OR site:heraldlive.co.za OR site:caxton.co.za OR site:media24.com) ${searchConstraint}` },
+    { name: "National & Regional News", query: `"Eastern Cape" ${termsQuery} ${partyExclusion} ${searchConstraint}` },
     { name: "Official & Local News", query: `"Eastern Cape" South Africa (site:gov.za OR news) ${termsQuery} ${partyExclusion} ${searchConstraint}` }
   ];
 
@@ -180,15 +209,22 @@ export async function runMonitoring(
       );
       
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-      const chunkCount = discoveryResponse.candidates?.[0]?.groundingMetadata?.groundingChunks?.length || 0;
-      log(`DATA: Received ${chunkCount} raw grounding chunks from ${sq.name} in ${duration}s.`);
+      const groundingMetadata = discoveryResponse.candidates?.[0]?.groundingMetadata;
+      const chunkCount = groundingMetadata?.groundingChunks?.length || 0;
+      
+      if (!groundingMetadata) {
+        log(`WARNING: No grounding metadata returned for ${sq.name}. The Google Search tool may be disabled for this API key.`);
+      } else {
+        log(`DATA: Received ${chunkCount} raw grounding chunks from ${sq.name} in ${duration}s.`);
+      }
       
       return {
         text: discoveryResponse.text || "",
-        chunks: discoveryResponse.candidates?.[0]?.groundingMetadata?.groundingChunks || []
+        chunks: groundingMetadata?.groundingChunks || []
       };
     } catch (error: any) {
       log(`ERROR: Network failure for ${sq.name}. Code: ${error.code || 'UNKNOWN'}. Message: ${error.message}`);
+      if (error.message === "QUOTA_EXHAUSTED") throw error;
       return { text: "", chunks: [] };
     }
   });
@@ -199,6 +235,13 @@ export async function runMonitoring(
     Promise.all(discoveryPromises),
     rssPromise
   ]);
+
+  const totalDiscoveryChunks = discoveryResultsArray.reduce((acc, r) => acc + r.chunks.length, 0);
+  log(`SYSTEM: Discovery phase complete. Found ${totalDiscoveryChunks} search chunks and ${rssArticles.length} RSS articles.`);
+
+  if (totalDiscoveryChunks === 0 && rssArticles.length === 0) {
+    log("CRITICAL: No data found from any source. Check your API key, search terms, or backend connectivity.");
+  }
 
   log("LOGIC: Aggregating multi-source results and performing proactive URI verification...");
   
@@ -269,17 +312,23 @@ export async function runMonitoring(
   log(`SYSTEM: Discovery phase complete. ${uriToId.size} unique URIs identified and proactively verified.`);
 
   if (uriToId.size === 0 && !indexedContext) {
-    currentReport.verification_checklist = [{ domain: "All Sources", status: "Checked - No Relevant Articles", findings_summary: "No articles matching the criteria were found." }];
+    currentReport.verification_checklist = [{ 
+      domain: "System Wide", 
+      status: "Zero Results", 
+      findings_summary: "The discovery engine returned no relevant articles. This could be due to restrictive search terms, a missing API key, or backend connectivity issues." 
+    }];
     log("SYSTEM: Monitoring Complete - Zero relevant articles identified in current cycle.");
     return currentReport;
   }
 
   log("SYSTEM: Initializing Semantic Verification Pipeline (Gemini 3 Flash Inference)...");
 
+  const todayLong = new Intl.DateTimeFormat('en-ZA', { dateStyle: 'long' }).format(now);
+
   // 2. Semantic Verification Loop - Parallelized batching
   const systemInstruction = `
     You are a Senior Media Intelligence Analyst for the Eastern Cape Office of the Premier.
-    TODAY'S DATE IS: ${today} (March 25, 2026).
+    TODAY'S DATE IS: ${today} (${todayLong}).
     
     CRITICAL: You have been provided with an INDEXED CONTEXT where each article is prefixed with a Reference ID (e.g., [REF_1]).
     

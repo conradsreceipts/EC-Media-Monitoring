@@ -193,10 +193,20 @@ export async function fetchRSSFeeds(onProgress?: (status: string) => void) {
         if (!response.ok) {
           const errorMsg = `Failed to fetch ${source.name} from ${url}: HTTP ${response.status} ${response.statusText}`;
           console.warn(errorMsg);
-          // Don't flood progress with every failover warning unless it's a critical failure later
+          if (onProgress) onProgress(`WARNING: ${source.name} returned HTTP ${response.status}`);
           continue; 
         }
         
+        const contentType = response.headers.get("content-type");
+        if (contentType && !contentType.includes("application/json")) {
+          const text = await response.text();
+          if (text.toLowerCase().includes("<!doctype html") || text.toLowerCase().includes("<html")) {
+            console.error(`RSS FETCH ERROR: Received HTML instead of JSON for ${source.name} from ${url}`);
+            if (onProgress) onProgress(`CRITICAL: Backend API returned HTML (likely a 404 or redirect) for ${source.name}`);
+            continue;
+          }
+        }
+
         const feed = await response.json();
         
         if (!feed.items || feed.items.length === 0) {
