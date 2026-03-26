@@ -193,11 +193,23 @@ export default function App() {
     setLoading(true);
     setLoadingStatus("Initializing...");
     setLoadingStage(1);
-    setActivityLog(["System: Initializing Media Intelligence Discovery..."]);
+    setActivityLog(["SYSTEM: Initializing Media Intelligence Discovery..."]);
     setShowLogs(true); // Automatically show logs when starting
     setError(null);
     setShowRunDropdown(false);
     setShowCompletionPopup(false);
+
+    // Check backend health before starting
+    try {
+      const healthRes = await fetch('/api/health');
+      if (healthRes.ok) {
+        setActivityLog(prev => [...prev, "CONNECTION: Backend API is online and reachable."]);
+      } else {
+        setActivityLog(prev => [...prev, `CRITICAL: Backend API returned status ${healthRes.status}. RSS fetching will likely fail.`]);
+      }
+    } catch (e) {
+      setActivityLog(prev => [...prev, "CRITICAL: Backend API is UNREACHABLE. Ensure the server is running and routes are configured."]);
+    }
 
     try {
       const result = await runMonitoring(finalConfig, userApiKey.trim() || undefined, (partialReport, status) => {

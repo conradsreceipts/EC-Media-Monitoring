@@ -15,8 +15,10 @@ const httpsAgent = new https.Agent({
   timeout: 60000
 });
 
+const app = express();
+export default app;
+
 async function startServer() {
-  const app = express();
   const PORT = 3000;
   const parser = new Parser({
     timeout: 10000,
@@ -191,7 +193,7 @@ async function startServer() {
   });
 
   // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -205,9 +207,12 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  // Only listen if we're not in a serverless environment (like Vercel)
+  if (!process.env.VERCEL) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  }
 }
 
 startServer();
