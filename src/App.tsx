@@ -139,6 +139,7 @@ export default function App() {
   const [showMobileDetail, setShowMobileDetail] = useState(false);
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
   const [showCompletionPopup, setShowCompletionPopup] = useState(false);
+  const [showQuotaPopup, setShowQuotaPopup] = useState(false);
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -204,9 +205,13 @@ export default function App() {
         });
       });
       setReport(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setError('Failed to run monitoring. Please check your API key and network connection.');
+      if (err.message === "QUOTA_EXHAUSTED") {
+        setShowQuotaPopup(true);
+      } else {
+        setError('Failed to run monitoring. Please check your API key and network connection.');
+      }
     } finally {
       setLoading(false);
       setLoadingStatus("");
@@ -320,8 +325,11 @@ export default function App() {
       if (selectedArticle && selectedArticle.article_url === articleUrl) {
         setSelectedArticle({ ...selectedArticle, summary_1_sentence: summary });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      if (err.message === "QUOTA_EXHAUSTED") {
+        setShowQuotaPopup(true);
+      }
     }
   };
 
@@ -774,6 +782,114 @@ export default function App() {
                   className="w-full py-4 bg-[#004A99] text-white rounded-2xl font-bold transition-all hover:bg-[#003366] shadow-lg shadow-blue-900/20 disabled:opacity-50"
                 >
                   Apply & Run Monitor
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showQuotaPopup && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-md z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-white rounded-[40px] shadow-2xl w-full max-w-lg overflow-hidden"
+            >
+              <div className="p-8 border-b border-gray-100 flex items-center justify-between bg-red-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="bg-red-500 p-2 rounded-xl text-white">
+                    <Zap className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-red-700">Quota Exceeded</h3>
+                    <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest">
+                      Free Tier Limit Reached
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowQuotaPopup(false)}
+                  className="p-2 hover:bg-red-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-red-400" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-6">
+                <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
+                  <h4 className="text-sm font-bold mb-3 flex items-center gap-2">
+                    <Info className="w-4 h-4 text-blue-500" />
+                    What happened?
+                  </h4>
+                  <p className="text-xs text-gray-600 leading-relaxed">
+                    The embedded API key has reached its free tier limit. To continue using the EC Media Intelligence Engine, you'll need to provide your own Gemini API key from Google AI Studio.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <h4 className="text-sm font-bold flex items-center gap-2">
+                    <ExternalLink className="w-4 h-4 text-[#004A99]" />
+                    How to get a free API Key:
+                  </h4>
+                  <ol className="space-y-3">
+                    {[
+                      { step: "1", text: "Visit Google AI Studio", link: "https://aistudio.google.com/app/apikey" },
+                      { step: "2", text: "Sign in with your Google Account" },
+                      { step: "3", text: "Click 'Create API key' in the left sidebar" },
+                      { step: "4", text: "Copy your new key and paste it below" }
+                    ].map((item, i) => (
+                      <li key={i} className="flex items-start gap-3">
+                        <span className="flex-shrink-0 w-5 h-5 bg-blue-100 text-[#004A99] rounded-full flex items-center justify-center text-[10px] font-bold">
+                          {item.step}
+                        </span>
+                        <div className="text-xs text-gray-600">
+                          {item.text}
+                          {item.link && (
+                            <a 
+                              href={item.link} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="ml-2 text-[#004A99] hover:underline font-bold inline-flex items-center gap-1"
+                            >
+                              aistudio.google.com <ExternalLink className="w-2.5 h-2.5" />
+                            </a>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider ml-1">Your Gemini API Key</label>
+                  <div className="relative">
+                    <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input 
+                      type="password"
+                      value={userApiKey}
+                      onChange={(e) => setUserApiKey(e.target.value)}
+                      placeholder="Paste your API key here (AIza...)"
+                      className="w-full pl-12 pr-4 py-4 bg-gray-50 border border-gray-200 rounded-2xl outline-none focus:ring-2 focus:ring-[#004A99] font-medium text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-8 bg-gray-50 border-t border-gray-100">
+                <button 
+                  onClick={() => {
+                    if (userApiKey) {
+                      setShowQuotaPopup(false);
+                      handleMonitor();
+                    }
+                  }}
+                  disabled={!userApiKey}
+                  className="w-full py-4 bg-[#004A99] text-white rounded-2xl font-bold text-sm hover:bg-[#003366] transition-all shadow-lg shadow-blue-900/20 disabled:opacity-50"
+                >
+                  Save Key & Retry Monitor
                 </button>
               </div>
             </motion.div>

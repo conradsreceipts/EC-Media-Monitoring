@@ -23,8 +23,15 @@ async function callGeminiWithRetry<T>(
       
       // Check for rate limit (429) or other transient errors
       const isRateLimit = error.status === "RESOURCE_EXHAUSTED" || error.code === 429 || error.message?.includes("429") || error.message?.includes("quota");
+      
+      if (isRateLimit) {
+        // If it's a rate limit, we might want to stop retrying if we've hit it multiple times
+        // or just throw it immediately if we want the UI to handle it.
+        // For this request, we'll throw it so the UI can show the popup.
+        throw new Error("QUOTA_EXHAUSTED");
+      }
+
       const isTransient = 
-        isRateLimit ||
         error.message?.includes("Rpc failed") || 
         error.message?.includes("xhr error") ||
         error.message?.includes("fetch failed") ||
